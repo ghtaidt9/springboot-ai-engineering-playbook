@@ -1,5 +1,27 @@
-Use Java 17.
-Prefer immutable objects.
-Use constructor injection.
-Do not use field injection.
-Do not use Lombok @Data on entities.
+Java Version:
+Java 17
+
+Framework:
+Spring Boot 4.5
+
+Persistence:
+Mybatis
+Hibernate
+
+Database:
+PostgreSQL
+
+Validation:
+Jakarta Validation
+
+API:
+RESTful API
+
+Documentation:
+OpenAPI
+
+Mapping:
+MapStruct
+
+Migration:
+Flyway
