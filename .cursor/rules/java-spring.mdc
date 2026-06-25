@@ -1,0 +1,69 @@
+---
+description: Java 17 + Spring Boot 3 conventions and code patterns
+globs: "**/*.java"
+alwaysApply: false
+---
+
+# Java & Spring Boot Rules
+
+## Language
+- Java 17 — use `record`, sealed classes, text blocks, pattern matching where appropriate
+- Prefer `Optional` over `null` returns in domain layer
+- Use `@NonNull` / `@Nullable` (Jakarta) on public method params
+
+## Spring Boot
+- `@SpringBootApplication` only on main class — no scanning hacks
+- `@ConfigurationProperties` for typed config — no `@Value` string injection
+- Profiles: `default` (local H2), `docker`, `prod`
+
+## DO ✅
+```java
+// Constructor injection with final fields
+@Service
+public class OrderApplicationService {
+    private final OrderRepository orderRepository;
+    private final EventPublisher eventPublisher;
+
+    public OrderApplicationService(OrderRepository orderRepository,
+                                   EventPublisher eventPublisher) {
+        this.orderRepository = orderRepository;
+        this.eventPublisher = eventPublisher;
+    }
+}
+
+// Immutable DTO as record
+public record CreateOrderRequest(
+    @NotBlank String customerId,
+    @NotEmpty List<OrderItemRequest> items
+) {}
+```
+
+## DON'T ❌
+```java
+// Field injection
+@Autowired
+private OrderRepository orderRepository;  // ❌ never
+
+// Mutable DTO
+public class CreateOrderRequest {
+    private String customerId;  // ❌ use record instead
+    public void setCustomerId(String id) { ... }
+}
+```
+
+## Naming Conventions
+| Type | Convention | Example |
+|------|-----------|---------|
+| Domain entity | `PascalCase` | `Order`, `PaymentTransaction` |
+| Value object | `PascalCase` | `Money`, `OrderId` |
+| DTO | `{Action}{Entity}Request/Response` | `CreateOrderRequest` |
+| Event | `{Entity}{PastTense}Event` | `OrderCreatedEvent` |
+| Repository interface | `{Entity}Repository` | `OrderRepository` |
+| JPA entity | `{Entity}JpaEntity` | `OrderJpaEntity` |
+
+## Checklist before PR
+- [ ] No `@Autowired` on fields
+- [ ] All DTOs are `record`
+- [ ] Domain classes have zero Spring imports
+- [ ] No business logic in `@RestController`
+- [ ] MapStruct mapper exists for every JPA↔domain mapping

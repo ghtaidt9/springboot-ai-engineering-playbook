@@ -1,0 +1,30 @@
+---
+description: Core invariants and agent workflow for every coding session
+alwaysApply: true
+---
+
+# Core Invariants
+
+## Architecture
+- Hexagonal: domain layer has ZERO Spring/framework imports
+- Layer order: `domain` ← `application` ← `adapter/{in,out}`
+- No cross-service DB access — use events or REST API calls
+
+## Dependency Rules
+- Constructor injection ONLY — never `@Autowired` on field
+- Domain entities never extend JPA entities — map in adapter/out/persistence
+- DTOs are `record` types — immutable, no setters
+
+## Persistence
+- Spring Data JPA is the ONLY ORM (ADR-002)
+- All schema changes MUST have a Flyway migration script
+- Repository interfaces live in `adapter/out/persistence/`
+
+## Events
+- SQS FIFO for all inter-service messaging (ADR-001)
+- Event class names: `{Entity}{PastTense}Event` e.g. `OrderCreatedEvent`
+- Event fields: `eventId` (UUID), `occurredAt` (Instant), `aggregateId` (String)
+
+## Workflow Reminder
+Before writing code: check Context Routing in `AGENTS.md`.
+After writing code: confirm the relevant capability `.mdc` checklist passes.

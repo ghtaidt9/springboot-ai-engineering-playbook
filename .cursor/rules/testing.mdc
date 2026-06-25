@@ -1,0 +1,112 @@
+---
+description: Testing strategy and patterns — unit, slice, integration
+globs: ["**/*Test.java", "**/*IT.java", "**/test/**/*.java"]
+alwaysApply: false
+---
+
+# Testing Rules
+
+## Test Pyramid
+
+| Layer | Annotation | What to test | Speed |
+|-------|-----------|--------------|-------|
+| Unit | `@ExtendWith(MockitoExtension.class)` | Domain logic, application service | Fast |
+| Slice | `@WebMvcTest`, `@DataJpaTest` | Controller, JPA queries | Medium |
+| Integration | `@SpringBootTest` + Testcontainers | Full flow, DB, SQS | Slow |
+
+## Naming Convention
+```
+MethodName_StateUnderTest_ExpectedBehavior
+createOrder_withInvalidCustomerId_throwsDomainException
+```
+
+## Unit Test Pattern (Domain)
+```java
+class OrderTest {
+
+    @Test
+    void createOrder_withValidItems_setsStatusToPending() {
+        // Given
+        var items = List.of(new OrderItem(ProductId.of("P1"), 2, Money.of(50, "USD")));
+
+        // When
+        var order = Order.create(CustomerId.of("C1"), items);
+
+        // Then
+        assertThat(order.getStatus()).isEqualTo(OrderStatus.PENDING);
+        assertThat(order.getTotalAmount()).isEqualTo(Money.of(100, "USD"));
+    }
+
+    @Test
+    void createOrder_withEmptyItems_throwsDomainException() {
+        assertThatThrownBy(() -> Order.create(CustomerId.of("C1"), List.of()))
+            .isInstanceOf(DomainException.class)
+            .hasMessage("Order must have at least one item");
+    }
+}
+```
+
+## Application Service Test Pattern
+```java
+@ExtendWith(MockitoExtension.class)
+class OrderApplicationServiceTest {
+
+    @Mock OrderRepository orderRepository;
+    @Mock OrderEventPublisher eventPublisher;
+
+    @InjectMocks OrderApplicationService service;
+
+    @Test
+    void createOrder_persistsAndPublishesEvent() {
+        // Given
+        var request = new CreateOrderRequest("customer-1", List.of(...));
+        var savedOrder = Order.create(...);
+        given(orderRepository.save(any())).willReturn(savedOrder);
+
+        // When
+        service.createOrder(request);
+
+        // Then
+        then(orderRepository).should().save(any(Order.class));
+        then(eventPublisher).should().publishOrderCreated(savedOrder);
+    }
+}
+```
+
+## Controller Slice Test
+```java
+@WebMvcTest(OrderController.class)
+class OrderControllerTest {
+
+    @Autowired MockMvc mockMvc;
+    @MockBean OrderApplicationService orderService;
+
+    @Test
+    void createOrder_withValidRequest_returns201() throws Exception {
+        given(orderService.createOrder(any())).willReturn(new OrderResponse("order-1", ...));
+
+        mockMvc.perform(post("/api/v1/orders")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""
+                    {"customerId": "c1", "items": [{"productId": "p1", "quantity": 2}]}
+                    """))
+            .andExpect(status().isCreated())
+            .andExpect(header().exists("Location"))
+            .andExpect(jsonPath("$.orderId").value("order-1"));
+    }
+}
+```
+
+## Rules
+- Domain layer: 100% unit test coverage (no mocking of domain)
+- Application service: mock repositories and publishers
+- Controller: `@WebMvcTest` only — no Spring context for unit tests
+- Integration tests use Testcontainers (Postgres, LocalStack for SQS)
+- Test data builders — no raw constructors in test setup
+
+## Checklist before PR
+- [ ] New domain logic has unit tests
+- [ ] New endpoint has `@WebMvcTest` slice test
+- [ ] Happy path + at least one failure path tested
+- [ ] No `Thread.sleep()` in tests — use Awaitility for async
+- [ ] Integration test added for cross-layer flows

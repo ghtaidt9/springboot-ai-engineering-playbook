@@ -1,0 +1,75 @@
+---
+description: REST API design standards — controllers, DTOs, error responses
+globs: ["**/*Controller.java", "**/dto/**/*.java", "**/web/**/*.java"]
+alwaysApply: false
+---
+
+# REST API Rules
+
+## URL Design
+- Resource-first, kebab-case: `/api/v1/orders`, `/api/v1/order-items`
+- No verbs in URL — use HTTP method semantics
+- Versioning: `/api/v1/` prefix always
+- Pagination params: `?page=0&size=20&sort=createdAt,desc`
+
+## HTTP Method Mapping
+| Action | Method | URL | Response |
+|--------|--------|-----|----------|
+| Create | POST | `/orders` | 201 + Location header |
+| Read one | GET | `/orders/{id}` | 200 |
+| Read list | GET | `/orders` | 200 + Page wrapper |
+| Full update | PUT | `/orders/{id}` | 200 |
+| Partial update | PATCH | `/orders/{id}` | 200 |
+| Delete | DELETE | `/orders/{id}` | 204 |
+
+## Controller Pattern
+
+```java
+@RestController
+@RequestMapping("/api/v1/orders")
+@RequiredArgsConstructor
+@Tag(name = "Orders", description = "Order management")
+public class OrderController {
+
+    private final OrderApplicationService orderService;
+
+    @PostMapping
+    @Operation(summary = "Create a new order")
+    public ResponseEntity<OrderResponse> createOrder(
+            @Valid @RequestBody CreateOrderRequest request) {
+        OrderResponse response = orderService.createOrder(request);
+        URI location = URI.create("/api/v1/orders/" + response.orderId());
+        return ResponseEntity.created(location).body(response);
+    }
+}
+```
+
+## Error Response Format (MUST follow)
+```json
+{
+  "timestamp": "2026-06-25T10:00:00Z",
+  "status": 400,
+  "error": "Validation Failed",
+  "message": "customerId must not be blank",
+  "path": "/api/v1/orders",
+  "traceId": "abc123"
+}
+```
+
+## Validation Rules
+- Use Jakarta Bean Validation on request records
+- Global `@RestControllerAdvice` handles all exceptions — no try/catch in controllers
+- Domain exceptions → map to HTTP status in `GlobalExceptionHandler`
+
+## OpenAPI
+- Every endpoint has `@Operation(summary = ...)` and `@ApiResponse` annotations
+- DTOs have `@Schema` field descriptions
+- Generate spec at build time: `springdoc-openapi-starter-webmvc-ui`
+
+## Checklist before PR
+- [ ] URL follows resource-first, kebab-case convention
+- [ ] Controller has zero business logic
+- [ ] All request bodies use `@Valid`
+- [ ] Error responses match standard format
+- [ ] OpenAPI annotations present
+- [ ] Integration test covers happy path + validation failure

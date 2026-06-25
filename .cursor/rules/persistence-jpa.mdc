@@ -1,0 +1,107 @@
+---
+description: Spring Data JPA persistence patterns — entities, repositories, mapping
+globs: ["**/entity/**/*.java", "**/repository/**/*.java", "**/persistence/**/*.java"]
+alwaysApply: false
+---
+
+# Persistence Rules (JPA — ADR-002)
+
+## JPA Entity Rules
+- JPA entities are **adapter concerns** — live in `adapter/out/persistence/entity/`
+- Domain entities NEVER extend or reference JPA entities
+- All JPA entities have `@Table(name = "...")` explicit table name
+- Use `UUID` for primary keys, generated as `@UuidGenerator`
+- Audit fields via `@EntityListeners(AuditingEntityListener.class)`
+
+## DO ✅
+```java
+// JPA entity in adapter layer
+@Entity
+@Table(name = "orders")
+public class OrderJpaEntity {
+
+    @Id
+    @UuidGenerator
+    private UUID id;
+
+    @Column(nullable = false)
+    private String customerId;
+
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false)
+    private OrderStatus status;
+
+    @CreatedDate
+    private Instant createdAt;
+
+    @LastModifiedDate
+    private Instant updatedAt;
+}
+
+// Repository interface — Spring Data only
+public interface OrderJpaRepository extends JpaRepository<OrderJpaEntity, UUID> {
+    List<OrderJpaEntity> findByCustomerIdAndStatus(String customerId, OrderStatus status);
+
+    @Query("SELECT o FROM OrderJpaEntity o WHERE o.createdAt >= :from")
+    Page<OrderJpaEntity> findRecentOrders(@Param("from") Instant from, Pageable pageable);
+}
+```
+
+## DON'T ❌
+```java
+// Domain entity with JPA annotations
+@Entity  // ❌ domain must not know JPA
+public class Order {
+    @Id
+    private UUID id;
+}
+
+// Native SQL for simple queries
+@Query(value = "SELECT * FROM orders WHERE customer_id = ?1", nativeQuery = true)  // ❌ use JPQL
+```
+
+## Mapping Pattern (MapStruct)
+```java
+@Mapper(componentModel = "spring")
+public interface OrderPersistenceMapper {
+    OrderJpaEntity toJpaEntity(Order domain);
+    Order toDomain(OrderJpaEntity jpa);
+    List<Order> toDomainList(List<OrderJpaEntity> jpaList);
+}
+```
+
+## Repository Adapter Pattern
+```java
+// Implements domain port
+@Component
+@RequiredArgsConstructor
+public class OrderRepositoryAdapter implements OrderRepository {
+
+    private final OrderJpaRepository jpaRepository;
+    private final OrderPersistenceMapper mapper;
+
+    @Override
+    public Order save(Order order) {
+        return mapper.toDomain(jpaRepository.save(mapper.toJpaEntity(order)));
+    }
+
+    @Override
+    public Optional<Order> findById(OrderId id) {
+        return jpaRepository.findById(id.value()).map(mapper::toDomain);
+    }
+}
+```
+
+## Flyway Migration Rules
+- File naming: `V{version}__{description}.sql` — e.g. `V001__create_orders_table.sql`
+- Version is zero-padded 3 digits
+- Each migration is **idempotent** where possible
+- NEVER edit a committed migration — create a new one
+
+## Checklist before PR
+- [ ] JPA entity is in `adapter/out/persistence/entity/` package
+- [ ] Domain entity has NO JPA imports
+- [ ] MapStruct mapper exists for this entity
+- [ ] Repository adapter implements domain port interface
+- [ ] Flyway migration file created for schema changes
+- [ ] Migration filename follows `V{3-digit}__{snake_description}.sql`

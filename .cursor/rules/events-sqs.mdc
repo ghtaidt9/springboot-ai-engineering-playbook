@@ -1,0 +1,104 @@
+---
+description: SQS FIFO event publishing and consuming conventions
+globs: ["**/messaging/**/*.java", "**/event/**/*.java", "**/*Listener.java", "**/*Publisher.java"]
+alwaysApply: false
+---
+
+# Event-Driven Rules (SQS FIFO — ADR-001)
+
+## Event Structure (MUST follow exactly)
+```java
+// Base event — all domain events extend this
+public record DomainEvent(
+    String eventId,        // UUID string
+    String eventType,      // "OrderCreated", "PaymentFailed"
+    String aggregateId,    // domain entity ID
+    String aggregateType,  // "Order", "Payment"
+    Instant occurredAt,    // UTC
+    String correlationId,  // trace ID for distributed tracing
+    Object payload         // concrete event data
+) {}
+
+// Concrete event payload
+public record OrderCreatedPayload(
+    String orderId,
+    String customerId,
+    BigDecimal totalAmount,
+    String currency,
+    List<String> itemIds
+) {}
+```
+
+## Publisher Pattern
+```java
+@Component
+@RequiredArgsConstructor
+public class SqsOrderEventPublisher implements OrderEventPublisher {
+
+    private final SqsAsyncClient sqsClient;
+    private final ObjectMapper objectMapper;
+
+    @Value("${aws.sqs.order-events.url}")
+    private String queueUrl;
+
+    @Override
+    public void publishOrderCreated(Order order) {
+        DomainEvent event = new DomainEvent(
+            UUID.randomUUID().toString(),
+            "OrderCreated",
+            order.getId().value(),
+            "Order",
+            Instant.now(),
+            MDC.get("traceId"),
+            new OrderCreatedPayload(...)
+        );
+        sendToSqs(event, order.getId().value()); // messageGroupId = aggregateId for FIFO
+    }
+
+    private void sendToSqs(DomainEvent event, String messageGroupId) {
+        try {
+            sqsClient.sendMessage(SendMessageRequest.builder()
+                .queueUrl(queueUrl)
+                .messageBody(objectMapper.writeValueAsString(event))
+                .messageGroupId(messageGroupId)
+                .messageDeduplicationId(event.eventId())
+                .build());
+        } catch (JsonProcessingException e) {
+            throw new EventPublishingException("Failed to serialize event", e);
+        }
+    }
+}
+```
+
+## Consumer Pattern
+```java
+@SqsListener("${aws.sqs.order-events.url}")
+public void handleOrderCreated(String message) {
+    try {
+        DomainEvent event = objectMapper.readValue(message, DomainEvent.class);
+        MDC.put("traceId", event.correlationId());  // propagate trace
+        // delegate to application service
+        notificationService.handleOrderCreated(event);
+    } catch (Exception e) {
+        log.error("Failed to process event: {}", message, e);
+        throw e; // rethrow → SQS dead-letter queue
+    } finally {
+        MDC.clear();
+    }
+}
+```
+
+## Rules
+- `messageGroupId` MUST equal `aggregateId` (guarantees FIFO per entity)
+- `messageDeduplicationId` MUST equal `eventId` (idempotent delivery)
+- Consumer MUST rethrow on failure → goes to DLQ (dead-letter queue)
+- NEVER change existing event field names — add new fields only
+- NEVER delete event fields without a deprecation period of ≥ 1 release
+
+## Checklist before PR
+- [ ] Event has all 7 required base fields
+- [ ] Publisher uses `aggregateId` as `messageGroupId`
+- [ ] Publisher uses `eventId` as `messageDeduplicationId`
+- [ ] Consumer propagates `correlationId` to MDC
+- [ ] Consumer rethrows on failure (DLQ path)
+- [ ] No breaking change to existing event schema
