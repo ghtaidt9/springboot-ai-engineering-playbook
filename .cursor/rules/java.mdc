@@ -1,0 +1,5 @@
+Use Java 17.
+Prefer immutable objects.
+Use constructor injection.
+Do not use field injection.
+Do not use Lombok @Data on entities.

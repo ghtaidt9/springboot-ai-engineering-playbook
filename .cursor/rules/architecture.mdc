@@ -1,0 +1,5 @@
+Follow Hexagonal Architecture.
+Controllers contain no business logic.
+Application layer orchestrates use cases.
+Domain layer contains business rules.
+Infrastructure implements ports.
