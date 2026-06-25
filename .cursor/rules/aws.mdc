@@ -1,6 +1,0 @@
-Use:
-SQS FIFO
-CloudWatch
-OpenTelemetry
-Secrets Manager
-Follow Least Privilege Principle.

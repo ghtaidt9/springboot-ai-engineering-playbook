@@ -1,8 +1,0 @@
-Use:
-JUnit 5
-Mockito
-Testcontainers
-Generate:
-Happy path tests
-Edge cases
-Failure scenarios
